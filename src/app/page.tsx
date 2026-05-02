@@ -135,7 +135,7 @@ export default function HomePage() {
     setError(null);
 
     try {
-      const response = await fetch("/api/generate", {
+      const response = await fetch("/api", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
