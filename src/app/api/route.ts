@@ -6,8 +6,8 @@ import type {
   ExerciseType
 } from "@/types/exercise";
 
-const HF_MODEL_URL =
-  "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta";
+const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_MODEL = "llama3-8b-8192";
 
 function buildPrompt(payload: ExercisePayload): string {
   return `Tu es un professeur. Reponds UNIQUEMENT par un objet JSON valide, sans balises markdown, sans texte avant ou apres le JSON.
@@ -30,10 +30,6 @@ Si type "vrai-faux": pas de "options", "reponse" est un booleen true ou false.
 Si type "texte-a-trous": pas de "options", "reponse" est une string (reponse attendue).
 
 Tu peux ajouter "explication" (string) sur chaque question.`;
-}
-
-function wrapMixtralInstruction(content: string): string {
-  return `<s>[INST] ${content.trim()} [/INST]`;
 }
 
 function stripJsonFromCompletion(text: string): string {
@@ -166,27 +162,30 @@ function parseExerciseResponse(
   return { titre, instructions, questions };
 }
 
-function extractGeneratedText(data: unknown): string | null {
-  if (typeof data === "string") {
-    return data;
+function extractChatCompletionContent(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) {
+    return null;
   }
-  if (Array.isArray(data) && data.length > 0) {
-    const first = data[0] as Record<string, unknown>;
-    if (typeof first.generated_text === "string") {
-      return first.generated_text;
-    }
+  const choices = (data as { choices?: unknown[] }).choices;
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return null;
   }
-  if (typeof data === "object" && data !== null) {
-    const obj = data as Record<string, unknown>;
-    if (typeof obj.generated_text === "string") {
-      return obj.generated_text;
-    }
-    if (Array.isArray(obj.choices) && obj.choices[0]) {
-      const choice = obj.choices[0] as Record<string, unknown>;
-      if (typeof choice.text === "string") {
-        return choice.text;
-      }
-    }
+  const first = choices[0] as { message?: { content?: unknown } };
+  const content = first.message?.content;
+  return typeof content === "string" ? content : null;
+}
+
+function groqErrorMessage(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) {
+    return null;
+  }
+  const err = (data as { error?: unknown }).error;
+  if (typeof err === "string") {
+    return err;
+  }
+  if (typeof err === "object" && err !== null && "message" in err) {
+    const msg = (err as { message: unknown }).message;
+    return typeof msg === "string" ? msg : null;
   }
   return null;
 }
@@ -199,10 +198,10 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.HUGGINGFACE_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "Variable HUGGINGFACE_API_KEY manquante." },
+      { error: "Variable GROQ_API_KEY manquante." },
       { status: 500 }
     );
   }
@@ -223,46 +222,46 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Parametres invalides." }, { status: 400 });
   }
 
-  const prompt = buildPrompt(payload);
+  const userPrompt = buildPrompt(payload);
 
-  let hfResponse: Response;
+  let groqResponse: Response;
   try {
-    hfResponse = await fetch(HF_MODEL_URL, {
+    groqResponse = await fetch(GROQ_CHAT_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        inputs: wrapMixtralInstruction(prompt),
-        parameters: {
-          max_new_tokens: 2048,
-          temperature: 0.6,
-          return_full_text: false
-        }
+        model: GROQ_MODEL,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Tu es un professeur. Tu reponds exclusivement par un objet JSON brut, sans balises markdown, sans texte avant ou apres."
+          },
+          { role: "user", content: userPrompt }
+        ],
+        temperature: 0.6,
+        max_tokens: 4096
       })
     });
   } catch {
     return NextResponse.json(
-      { error: "Impossible de joindre Hugging Face." },
+      { error: "Impossible de joindre Groq." },
       { status: 502 }
     );
   }
 
-  const hfJson: unknown = await hfResponse.json().catch(() => null);
+  const groqJson: unknown = await groqResponse.json().catch(() => null);
 
-  if (!hfResponse.ok) {
+  if (!groqResponse.ok) {
     const errMsg =
-      hfJson &&
-      typeof hfJson === "object" &&
-      "error" in hfJson &&
-      typeof (hfJson as { error: string }).error === "string"
-        ? (hfJson as { error: string }).error
-        : `Hugging Face HTTP ${hfResponse.status}`;
+      groqErrorMessage(groqJson) ?? `Groq HTTP ${groqResponse.status}`;
     return NextResponse.json({ error: errMsg }, { status: 502 });
   }
 
-  const generated = extractGeneratedText(hfJson);
+  const generated = extractChatCompletionContent(groqJson);
   if (!generated) {
     return NextResponse.json(
       { error: "Reponse du modele illisible." },
