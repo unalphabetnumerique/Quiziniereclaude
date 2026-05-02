@@ -7,7 +7,7 @@ import type {
 } from "@/types/exercise";
 
 const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama3-8b-8192";
+const GROQ_MODEL = "llama-3.1-8b-instant";
 
 function buildPrompt(payload: ExercisePayload): string {
   return `Tu es un professeur. Reponds UNIQUEMENT par un objet JSON valide, sans balises markdown, sans texte avant ou apres le JSON.
