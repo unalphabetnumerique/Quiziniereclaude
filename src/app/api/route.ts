@@ -28,6 +28,9 @@ Contraintes:
 Si type "qcm": ajoute "options" (tableau de 4 strings) et "reponse" (string, egale a une des options).
 Si type "vrai-faux": pas de "options", "reponse" est un booleen true ou false.
 Si type "texte-a-trous": pas de "options", "reponse" est une string (reponse attendue).
+IMPORTANT: Le niveau ${payload.niveau} doit être strictement respecté.
+Les questions doivent correspondre exactement au programme scolaire
+français de ce niveau. Pas de questions trop simples.
 
 Tu peux ajouter "explication" (string) sur chaque question.`;
 }
@@ -238,7 +241,7 @@ export async function POST(request: NextRequest) {
           {
             role: "system",
             content:
-              "Tu es un professeur. Tu reponds exclusivement par un objet JSON brut, sans balises markdown, sans texte avant ou apres."
+              "Tu es un professeur. Tu reponds exclusivement par un objet JSON brut, sans balises markdown, sans texte avant ou apres. Tu adaptes toujours la difficulté au niveau scolaire exact demandé."
           },
           { role: "user", content: userPrompt }
         ],
