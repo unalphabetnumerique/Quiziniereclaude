@@ -6,8 +6,8 @@ import type {
   ExerciseType
 } from "@/types/exercise";
 
-const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.1-8b-instant";
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
 
 function buildPrompt(payload: ExercisePayload): string {
   return `Tu es un professeur. Reponds UNIQUEMENT par un objet JSON valide, sans balises markdown, sans texte avant ou apres le JSON.
@@ -162,20 +162,28 @@ function parseExerciseResponse(
   return { titre, instructions, questions };
 }
 
-function extractChatCompletionContent(data: unknown): string | null {
+function extractGeminiText(data: unknown): string | null {
   if (typeof data !== "object" || data === null) {
     return null;
   }
-  const choices = (data as { choices?: unknown[] }).choices;
-  if (!Array.isArray(choices) || choices.length === 0) {
+  const candidates = (data as { candidates?: unknown[] }).candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) {
     return null;
   }
-  const first = choices[0] as { message?: { content?: unknown } };
-  const content = first.message?.content;
-  return typeof content === "string" ? content : null;
+  const first = candidates[0] as {
+    content?: { parts?: Array<{ text?: unknown }> };
+  };
+  const parts = first.content?.parts;
+  if (!Array.isArray(parts)) {
+    return null;
+  }
+  const texts = parts
+    .map((part) => (typeof part.text === "string" ? part.text : ""))
+    .filter(Boolean);
+  return texts.length > 0 ? texts.join("\n") : null;
 }
 
-function groqErrorMessage(data: unknown): string | null {
+function geminiErrorMessage(data: unknown): string | null {
   if (typeof data !== "object" || data === null) {
     return null;
   }
@@ -198,10 +206,10 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "Variable GROQ_API_KEY manquante." },
+      { error: "Variable GOOGLE_API_KEY manquante." },
       { status: 500 }
     );
   }
@@ -224,44 +232,50 @@ export async function POST(request: NextRequest) {
 
   const userPrompt = buildPrompt(payload);
 
-  let groqResponse: Response;
+  let geminiResponse: Response;
   try {
-    groqResponse = await fetch(GROQ_CHAT_URL, {
+    geminiResponse = await fetch(GEMINI_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "x-goog-api-key": apiKey,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
+        contents: [
           {
-            role: "system",
-            content:
-              "Tu es un professeur. Tu reponds exclusivement par un objet JSON brut, sans balises markdown, sans texte avant ou apres."
-          },
-          { role: "user", content: userPrompt }
+            role: "user",
+            parts: [
+              {
+                text:
+                  "Tu es un professeur. Tu reponds exclusivement par un objet JSON brut, sans balises markdown, sans texte avant ou apres."
+              },
+              { text: userPrompt }
+            ]
+          }
         ],
-        temperature: 0.6,
-        max_tokens: 4096
+        generationConfig: {
+          temperature: 0.6,
+          maxOutputTokens: 4096
+        }
       })
     });
   } catch {
     return NextResponse.json(
-      { error: "Impossible de joindre Groq." },
+      { error: "Impossible de joindre Google Gemini." },
       { status: 502 }
     );
   }
 
-  const groqJson: unknown = await groqResponse.json().catch(() => null);
+  const geminiJson: unknown = await geminiResponse.json().catch(() => null);
 
-  if (!groqResponse.ok) {
+  if (!geminiResponse.ok) {
     const errMsg =
-      groqErrorMessage(groqJson) ?? `Groq HTTP ${groqResponse.status}`;
+      geminiErrorMessage(geminiJson) ??
+      `Google Gemini HTTP ${geminiResponse.status}`;
     return NextResponse.json({ error: errMsg }, { status: 502 });
   }
 
-  const generated = extractChatCompletionContent(groqJson);
+  const generated = extractGeminiText(geminiJson);
   if (!generated) {
     return NextResponse.json(
       { error: "Reponse du modele illisible." },
