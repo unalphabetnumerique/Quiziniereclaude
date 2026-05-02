@@ -7,7 +7,7 @@ import type {
 } from "@/types/exercise";
 
 const HF_MODEL_URL =
-  "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1";
+  "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta";
 
 function buildPrompt(payload: ExercisePayload): string {
   return `Tu es un professeur. Reponds UNIQUEMENT par un objet JSON valide, sans balises markdown, sans texte avant ou apres le JSON.
